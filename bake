@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+
+# shellcheck source-path=SCRIPTDIR
+PROJECT_ROOT="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd -P)"
+RECIPES_DIR="${PROJECT_ROOT}/.recipes"
+RECIPE_PREFIX='bake::recipe::'
+
+checkBashVersion() (
+    CURRENT_BASH_VERSION=$BASH_VERSION
+    MINIMAL_BASH_VERSION=${1-"5.1"}
+
+    printf -v versions '%s\n%s' "$CURRENT_BASH_VERSION" "$MINIMAL_BASH_VERSION"
+
+    if [[ $versions = "$(sort -V <<< "$versions")" ]]; then
+        echo "#### Bash version not sufficient"
+        echo "Please update bash to ${MINIMAL_BASH_VERSION} or higher."
+        echo "Current version: ${CURRENT_BASH_VERSION}"
+        return 1
+    fi
+)
+checkBashVersion "5.0" || exit $?
+
+# Create recipe folder if it does not exist already
+if [[ ! -d "${RECIPES_DIR}" ]]; then
+    mkdir -p "${RECIPES_DIR}"
+    echo "Recipe folder was not detected, creating it under '${RECIPES_DIR}'"
+fi
+
+# Source library functions
+recipes::source() {
+    [[ ! -d "${1}" ]] && return 1
+
+    for FILE in "${1}"/*; do
+        [[ -f "${FILE}" ]] && . "${FILE}"
+        [[ -d "${FILE}" ]] && recipes::source "${FILE}"
+    done
+}
+recipes::source "${RECIPES_DIR}"
+
+bake::help() (
+    echo "Usage: './bake <target> [arg1] [arg2] [...]'"
+    echo "    Available targets:"
+
+    AVAILABLE_FUNCTIONS_STRING="$(compgen -A function | grep -E -i "^${RECIPE_PREFIX}" | tr '\n' ' ')"
+    AVAILABLE_TARGETS=( ${AVAILABLE_FUNCTIONS_STRING//"${RECIPE_PREFIX}"/''} )
+    
+    LONGEST_LINE=0
+    for TARGET in "${AVAILABLE_TARGETS[@]}"; do
+        [[ ${#TARGET} -gt $LONGEST_LINE ]] && LONGEST_LINE=${#TARGET}
+    done
+    ((LONGEST_LINE+=5))
+
+    for TARGET in "${AVAILABLE_TARGETS[@]}"; do
+      RECIPE_LINE=$(grep -Eir "^${RECIPE_PREFIX}${TARGET}\(" ${RECIPES_DIR})
+      COMMENT=""
+      if [[ "${RECIPE_LINE}" == *"##"* ]]; then
+        COMMENT=$(sed 's/^.*## //g' <<< ${RECIPE_LINE})
+      fi
+
+      printf "        \033[36m%-${LONGEST_LINE}s \033[0m%s\n" "${TARGET}" "${COMMENT}"
+    done
+)
+
+TARGET=${1}
+ARGS=( "${@}" )
+unset "ARGS[0]"
+
+[[ "${TARGET}" == '' || "${TARGET}" == '-h' || "${TARGET}" == '--help' ]] && bake::help && exit 0
+
+time "${RECIPE_PREFIX}${TARGET}" "${ARGS[@]}"
+
+EXIT_CODE=$?
+
+[[ ${EXIT_CODE} -gt 0 ]] && echo "Error with exit code: ${EXIT_CODE}" && exit ${EXIT_CODE}
