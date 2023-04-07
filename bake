@@ -61,11 +61,27 @@ bake::help() (
     done
 )
 
+bake::is_valid_target() (
+    TARGET=$1
+    AVAILABLE_FUNCTIONS_STRING="$(compgen -A function | grep -E -i "^${RECIPE_PREFIX}" | tr '\n' ' ')"
+    AVAILABLE_TARGETS=( ${AVAILABLE_FUNCTIONS_STRING//"${RECIPE_PREFIX}"/''} )
+
+    for i in "${!AVAILABLE_TARGETS[@]}"; do
+        if [[ "${AVAILABLE_TARGETS[$i]}" = "${TARGET}" ]]; then
+            return 0
+        fi
+    done
+
+  return 1
+
+)
+
 TARGET=${1}
 ARGS=( "${@}" )
 unset "ARGS[0]"
 
-[[ "${TARGET}" == '' || "${TARGET}" == '-h' || "${TARGET}" == '--help' ]] && bake::help && exit 0
+[[ "${TARGET}" = "" || "${TARGET}" == '-h' || "${TARGET}" == '--help' ]] && bake::help && exit 0
+! bake::is_valid_target ${TARGET} && echo -e "\e[1;91mInvalid target [${TARGET}]\e[0m" && bake::help && exit 1
 
 time "${RECIPE_PREFIX}${TARGET}" "${ARGS[@]}"
 
