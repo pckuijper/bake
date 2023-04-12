@@ -20,13 +20,13 @@ checkBashVersion() (
 )
 checkBashVersion "5.0" || exit $?
 
-# Create recipe folder if it does not exist already
+## Create recipe folder if it does not exist already
 if [[ ! -d "${RECIPES_DIR}" ]]; then
     mkdir -p "${RECIPES_DIR}"
     echo "Recipe folder was not detected, creating it under '${RECIPES_DIR}'"
 fi
 
-# Source library functions
+## Recursively source functions from given directory to ensure we have access to all of them
 recipes::source() {
     [[ ! -d "${1}" ]] && return 1
 
@@ -41,9 +41,13 @@ bake::help() (
     echo "Usage: './bake <target> [arg1] [arg2] [...]'"
     echo "    Available targets:"
 
+    ## Fetch a list of all shell functions (compgen -A function), filter by prefix and replace newlines with spaces
     AVAILABLE_FUNCTIONS_STRING="$(compgen -A function | grep -E -i "^${RECIPE_PREFIX}" | tr '\n' ' ')"
-    AVAILABLE_TARGETS=( ${AVAILABLE_FUNCTIONS_STRING//"${RECIPE_PREFIX}"/''} )
+    ## Turn the list of available functions into an array and hide the prefix
+    read -ra AVAILABLE_TARGETS <<< "${AVAILABLE_FUNCTIONS_STRING//"${RECIPE_PREFIX}"/''}"
     
+    ## Find the longest function name
+    ## This is used later to determine the distance between functions and their comment
     LONGEST_LINE=0
     for TARGET in "${AVAILABLE_TARGETS[@]}"; do
         [[ ${#TARGET} -gt $LONGEST_LINE ]] && LONGEST_LINE=${#TARGET}
@@ -51,21 +55,28 @@ bake::help() (
     ((LONGEST_LINE+=5))
 
     for TARGET in "${AVAILABLE_TARGETS[@]}"; do
-      RECIPE_LINE=$(grep -Eir "^${RECIPE_PREFIX}${TARGET}\(" ${RECIPES_DIR})
-      COMMENT=""
-      if [[ "${RECIPE_LINE}" == *"##"* ]]; then
-        COMMENT=$(sed 's/^.*## //g' <<< ${RECIPE_LINE})
-      fi
+        ## Find the textual line of the recipe in order to find its comment
+        RECIPE_LINE=$(grep -Eir "^${RECIPE_PREFIX}${TARGET}\(" ${RECIPES_DIR})
+        COMMENT=""
+        if [[ "${RECIPE_LINE}" == *"##"* ]]; then
+            COMMENT=${RECIPE_LINE//*## /}
+        fi
 
-      printf "        \033[36m%-${LONGEST_LINE}s \033[0m%s\n" "${TARGET}" "${COMMENT}"
+        ## Print the available function with its comment
+        ## The target is written in blue, where the comment remains white
+        printf "        \033[36m%-${LONGEST_LINE}s \033[0m%s\n" "${TARGET}" "${COMMENT}"
     done
 )
 
 bake::is_valid_target() (
     TARGET=$1
-    AVAILABLE_FUNCTIONS_STRING="$(compgen -A function | grep -E -i "^${RECIPE_PREFIX}" | tr '\n' ' ')"
-    AVAILABLE_TARGETS=( ${AVAILABLE_FUNCTIONS_STRING//"${RECIPE_PREFIX}"/''} )
 
+    ## Fetch a list of all shell functions (compgen -A function), filter by prefix and replace newlines with spaces
+    AVAILABLE_FUNCTIONS_STRING="$(compgen -A function | grep -E -i "^${RECIPE_PREFIX}" | tr '\n' ' ')"
+    ## Turn the list of available functions into an array and hide the prefix
+    read -ra AVAILABLE_TARGETS <<< "${AVAILABLE_FUNCTIONS_STRING//"${RECIPE_PREFIX}"/''}"
+
+    ## Compare the given target vs a list of all targets
     for i in "${!AVAILABLE_TARGETS[@]}"; do
         if [[ "${AVAILABLE_TARGETS[$i]}" = "${TARGET}" ]]; then
             return 0
@@ -80,11 +91,14 @@ TARGET=${1}
 ARGS=( "${@}" )
 unset "ARGS[0]"
 
+## If no target is given, or the target is a help target, display the help
 [[ "${TARGET}" = "" || "${TARGET}" == '-h' || "${TARGET}" == '--help' ]] && bake::help && exit 0
+## If no valid target is found, inform the user and display the help
 ! bake::is_valid_target ${TARGET} && echo -e "\e[1;91mInvalid target [${TARGET}]\e[0m" && bake::help && exit 1
 
 time "${RECIPE_PREFIX}${TARGET}" "${ARGS[@]}"
 
 EXIT_CODE=$?
 
-[[ ${EXIT_CODE} -gt 0 ]] && echo "Error with exit code: ${EXIT_CODE}" && exit ${EXIT_CODE}
+## Inform the user if the program ran with any errors and which error code was returned
+[[ ${EXIT_CODE} -gt 0 ]] && echo -e "\e[1;91mError with exit code: ${EXIT_CODE}\e[0m" && exit ${EXIT_CODE}
